@@ -12,5 +12,5 @@
  *            "Textkorrekturen (config.js)" mit der Zahl der angewendeten Korrekturen.
  */
 window.LN_CONFIG = {
-  serverUrl: ''
+  serverUrl: 'https://script.google.com/macros/s/AKfycbxbCqo396yjlU0vhm9NzT9MQxCO1HHUOmCX0zMeRwpQlqcBzX4-g3hDHoVJPhv9hY88kA/exec'
 };
