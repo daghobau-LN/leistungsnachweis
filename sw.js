@@ -1,10 +1,11 @@
 /* Service Worker: hält die App auch ohne Internet startbereit.
    Nachweise und Server-Antworten werden hier NIE zwischengespeichert –
    die Warteschlange liegt in der App selbst. */
-const CACHE = 'ln-app-1.0.2';
+const CACHE = 'ln-app-1.2.1';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'app.js', 'config.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
+  'icons/logo.svg', 'icons/logo-mark.svg',
   'fonts/plex-sans-latin-400.woff2', 'fonts/plex-sans-latin-600.woff2',
   'fonts/plex-sans-latin-ext-400.woff2', 'fonts/plex-sans-latin-ext-600.woff2',
   'fonts/plex-arabic-arabic-400.woff2', 'fonts/plex-arabic-arabic-600.woff2'

@@ -13,7 +13,10 @@
     return;
   }
 
-  const APP_VERSION = '1.0.2';
+  const APP_VERSION = '1.2.1';
+  const PHOTO_MAX = 3;          // höchstens 3 Fotos je Nachweis (muss zu PHOTO_MAX im Server passen)
+  const PHOTO_EDGE = 1280;      // längste Kante nach dem Verkleinern
+  const PHOTO_CHARS = 300000;   // Ziel: höchstens ~300.000 Zeichen je Foto (≈ 220 KB), sonst stärker verkleinern
   const RAW_URL = String((window.LN_CONFIG && window.LN_CONFIG.serverUrl) || '').trim();
   const URL_OK = /^https:\/\/script\.google\.com\/(macros|a\/macros\/[\w.-]+)\/s\/[A-Za-z0-9_-]{20,}\/exec$/.test(RAW_URL) ||
     /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/[\w/.-]*$/.test(RAW_URL);
@@ -76,6 +79,11 @@
       sigPresent: 'Unterschrift vorhanden (Version {v})', sigNew: 'Neu unterschreiben', sigRemove: 'Entfernen',
       sigRemoved: 'Unterschrift wird entfernt', clientName: 'Name des Unterzeichners',
       addClientSig: 'Auftraggeber unterschreiben lassen',
+      photos: 'Fotos', photosHint: 'Erst mit der Kamera fotografieren, dann hier hochladen. Höchstens {n} Fotos.',
+      photoUpload: 'Foto hochladen', photoRemove: 'Foto entfernen',
+      photoLabel: 'Foto {n}', photoSaved: 'Foto {n} (schon gesendet)', photoMax: 'Es gehen höchstens {n} Fotos.',
+      photoWorking: 'Foto wird vorbereitet …', photoFail: 'Das Foto hat nicht geklappt. Bitte noch einmal.',
+      photoCount: '{n} Fotos', photoOne: '1 Foto', photoNone: 'keine',
       send: 'Senden', sendCorrection: 'Korrektur senden', cancel: 'Abbrechen', back: 'Zurück', ok: 'OK',
       required: 'Bitte ausfüllen.', endAfterStart: 'Das Ende muss nach dem Beginn liegen.',
       pauseTooLong: 'Die Pause ist länger als die Arbeitszeit.', pauseInvalid: 'Bitte die Pause in Minuten angeben (0 bis 600).',
@@ -168,6 +176,11 @@
       sigPresent: 'التوقيع موجود (النسخة {v})', sigNew: 'توقيع جديد', sigRemove: 'إزالة',
       sigRemoved: 'سيتم حذف التوقيع', clientName: 'اسم الموقّع',
       addClientSig: 'اطلب توقيع صاحب العمل',
+      photos: 'الصور', photosHint: 'صوّر أولاً بالكاميرا، ثم ارفع الصورة هنا. {n} صور كحد أقصى.',
+      photoUpload: 'رفع صورة', photoRemove: 'حذف الصورة',
+      photoLabel: 'صورة {n}', photoSaved: 'صورة {n} (أُرسلت من قبل)', photoMax: 'الحد الأقصى {n} صور.',
+      photoWorking: 'يتم تجهيز الصورة …', photoFail: 'لم تنجح الصورة. حاول مرة أخرى.',
+      photoCount: '{n} صور', photoOne: 'صورة واحدة', photoNone: 'لا يوجد',
       send: 'إرسال', sendCorrection: 'إرسال التصحيح', cancel: 'إلغاء', back: 'رجوع', ok: 'حسناً',
       required: 'هذا الحقل مطلوب.', endAfterStart: 'يجب أن تكون النهاية بعد البداية.',
       pauseTooLong: 'الاستراحة أطول من وقت العمل.', pauseInvalid: 'أدخل الاستراحة بالدقائق (من 0 إلى 600).',
@@ -249,6 +262,11 @@
       sigPresent: 'Îmze heye (guherto {v})', sigNew: 'Ji nû ve îmze bike', sigRemove: 'Rake',
       sigRemoved: 'Îmze dê were rakirin', clientName: 'Navê kesê ku îmze dike',
       addClientSig: 'Bila xwediyê kar îmze bike',
+      photos: 'Wêne', photosHint: 'Pêşî bi kamerayê wêne bikişîne, paşê li vir bar bike. Herî zêde {n} wêne.',
+      photoUpload: 'Wêne bar bike', photoRemove: 'Wêne rake',
+      photoLabel: 'Wêne {n}', photoSaved: 'Wêne {n} (berê hat şandin)', photoMax: 'Herî zêde {n} wêne dibin.',
+      photoWorking: 'Wêne tê amadekirin …', photoFail: 'Wêne pêk nehat. Ji kerema xwe dîsa biceribîne.',
+      photoCount: '{n} wêne', photoOne: '1 wêne', photoNone: 'tune',
       send: 'Bişîne', sendCorrection: 'Rastkirinê bişîne', cancel: 'Betal bike', back: 'Vegere', ok: 'Baş e',
       required: 'Ev qad pêwîst e.', endAfterStart: 'Dawî divê piştî destpêkê be.',
       pauseTooLong: 'Bêhnvedan ji dema kar dirêjtir e.', pauseInvalid: 'Bêhnvedanê bi deqîqeyan binivîse (0 heta 600).',
@@ -393,6 +411,8 @@
     }
   }
   const ltr = (s, cls) => h('span', { dir: 'ltr', class: 'num' + (cls ? ' ' + cls : '') }, s);
+  /** "keine" / "1 Foto" / "3 Fotos" – die Bilder selbst stehen im Word- und PDF-Dokument */
+  const photoText = (n) => (n === 0 ? t('photoNone') : n === 1 ? t('photoOne') : t('photoCount', { n: n }));
 
   const ICONS = {
     plus: 'M12 5v14M5 12h14',
@@ -405,6 +425,8 @@
     back: 'M15 5l-7 7 7 7',
     trash: 'M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13',
     doc: 'M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5',
+    image: 'M4 5h16v14H4zM4 16l4.5-4.5 3.5 3.5 3-3L20 16M9 9.5h.5',
+    upload: 'M12 16V4M12 4 7.5 8.5M12 4l4.5 4.5M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4',
     mail: 'M4 6h16v12H4zM4 7l8 6 8-6',
     out: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10',
     alert: 'M12 4l9 16H3zM12 10v4M12 17v.5',
@@ -695,7 +717,9 @@
       showBack
         ? h('button', { type: 'button', class: 'bar-btn back', 'aria-label': t('back'), onclick: goBack }, icon('back'))
         : h('span', { class: 'bar-spacer' }),
-      h('div', { class: 'bar-title' }, h('span', { class: 'bar-title-text' }, t('app')), DEMO ? h('span', { class: 'demo-tag' }, 'Demo') : null),
+      h('div', { class: 'bar-title' },
+        h('img', { class: 'bar-logo', src: 'icons/logo-mark.svg', alt: '', width: '28', height: '28', decoding: 'async' }),
+        h('span', { class: 'bar-title-text' }, t('app')), DEMO ? h('span', { class: 'demo-tag' }, 'Demo') : null),
       h('div', { class: 'bar-end' },
         pending ? h('span', { class: 'pending-dot', title: t('st_pending') }, String(pending)) : null,
         S.lang ? h('button', { type: 'button', class: 'bar-btn lang', 'aria-label': t('changeLang'), onclick: langMenu }, icon('globe'), h('span', null, S.lang.toUpperCase())) : null
@@ -787,8 +811,14 @@
   // ===================================================================
   //  Ansichten: Sprache, Anmeldung, Start
   // ===================================================================
+  /** Firmenlogo (Raute und Schriftzug „DAGHO BAU“) für Sprachauswahl und Anmeldung */
+  function brandLogo() {
+    return h('img', { class: 'brand-logo', src: 'icons/logo.svg', alt: 'Dagho Bau', width: '550', height: '336', decoding: 'async' });
+  }
+
   function viewLang() {
-    return h('section', { class: 'screen center' },
+    return h('section', { class: 'screen' },
+      brandLogo(),
       h('h1', { class: 'title' }, 'اختر اللغة', h('br'), 'Ziman hilbijêre', h('br'), 'Sprache wählen'),
       h('div', { class: 'stack' },
         ['ar', 'ku', 'de'].map((l) => h('button', {
@@ -846,6 +876,7 @@
     err, btn);
     setTimeout(() => input.focus(), 50);
     return h('section', { class: 'screen' },
+      brandLogo(),
       h('h1', { class: 'title' }, t('loginTitle')),
       h('p', { class: 'lead', id: 'pin-hint' }, t('loginHint')),
       form,
@@ -999,7 +1030,7 @@
     let F = {
       date: todayIso(), projectId: '', projectText: '', start: '', end: '', pauseMin: 30, activityIds: [],
       description: '', material: '', clientName: '', sigEmployee: null, sigClient: null, showClient: false,
-      descriptionDe: null, materialDe: null, projectDe: null
+      photos: [], descriptionDe: null, materialDe: null, projectDe: null
     };
     let reportLang = S.lang;
     let sigVersions = { employee: null, client: null };
@@ -1010,6 +1041,7 @@
         start: src.start, end: src.end, pauseMin: Number(src.pauseMin) || 0, activityIds: (src.activityIds || []).slice(),
         description: src.descriptionOrig || '', material: src.materialOrig || '', clientName: src.clientName || '',
         sigEmployee: src.sigEmployee ? 'keep' : null, sigClient: src.sigClient ? 'keep' : null, showClient: !!src.sigClient || !!src.clientName,
+        photos: (src.photos || []).map((p) => ({ keep: p.id })),
         descriptionDe: src.descriptionDe || '', materialDe: src.materialDe || '', projectDe: src.projectId ? '' : (src.projectDe || '')
       });
       sigVersions = { employee: src.sigEmployee ? src.sigEmployee.version : null, client: src.sigClient ? src.sigClient.version : null };
@@ -1021,6 +1053,7 @@
         pauseMin: r.pauseMin, activityIds: (r.activityIds || []).slice(), description: r.description || '', material: r.material || '',
         clientName: r.clientName || '', sigEmployee: r.sigEmployee || null, sigClient: r.sigClient || null,
         showClient: !!r.sigClient || !!r.clientName,
+        photos: (r.photos || []).map((p) => (String(p).slice(0, 5) === 'data:' ? { data: p } : { keep: p })),
         descriptionDe: r.descriptionDe === undefined ? null : r.descriptionDe, materialDe: r.materialDe === undefined ? null : r.materialDe,
         projectDe: r.projectDe === undefined ? null : r.projectDe
       });
@@ -1184,6 +1217,53 @@
     const clientToggle = h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { F.showClient = true; clientBlock.hidden = false; clientToggle.hidden = true; touch(); } }, icon('edit'), t('addClientSig'));
     clientToggle.hidden = F.showClient;
 
+    // Fotos (freiwillig): fertige Arbeit oder ein Problem. Sie kommen nur ins Word/PDF, nicht in die Excel-Liste.
+    const photoHost = h('div', { class: 'photos' });
+    const photoErr = h('p', { class: 'field-error', role: 'alert' });
+    const photoBusy = h('p', { class: 'field-hint', role: 'status' }, t('photoWorking'));
+    photoBusy.hidden = true;
+    // Ein Knopf, kein Kamera-Zugriff: Der Mitarbeiter fotografiert wie gewohnt mit der Kamera-App
+    // und lädt das Bild danach hier vom Handy hoch. Was das Auswahlfenster anbietet (Galerie, Dateien,
+    // auf manchen Handys auch die Kamera), entscheidet das Handy selbst.
+    const photoIn = h('input', { id: 'f-photo', type: 'file', accept: 'image/*', multiple: true, class: 'photo-input', tabindex: '-1', 'aria-hidden': 'true' });
+    photoIn.addEventListener('change', async (ev) => { const f = [...ev.target.files]; ev.target.value = ''; await addPhotos(f); });
+    const uploadBtn = h('button', { type: 'button', class: 'btn', onclick: () => photoIn.click() }, icon('upload'), t('photoUpload'));
+    const renderPhotos = () => {
+      photoHost.replaceChildren(...F.photos.map((p, i) => {
+        const label = p.keep ? t('photoSaved', { n: i + 1 }) : t('photoLabel', { n: i + 1 });
+        return h('div', { class: 'photo' },
+          p.data ? h('img', { class: 'photo-img', src: p.data, alt: label })
+            : h('div', { class: 'photo-img photo-kept' }, icon('image')),
+          h('span', { class: 'photo-cap' }, label),
+          h('button', {
+            type: 'button', class: 'icon-btn photo-del', 'aria-label': t('photoRemove') + ': ' + label,
+            onclick: () => { F.photos.splice(i, 1); photoErr.textContent = ''; renderPhotos(); touch(); }
+          }, icon('trash')));
+      }));
+      photoHost.hidden = !F.photos.length;
+      uploadBtn.disabled = F.photos.length >= PHOTO_MAX;
+    };
+    async function addPhotos(files) {
+      photoErr.textContent = '';
+      if (!files.length) return;
+      const free = Math.max(0, PHOTO_MAX - F.photos.length);
+      if (files.length > free) photoErr.textContent = t('photoMax', { n: PHOTO_MAX });
+      photoBusy.hidden = false;
+      try {
+        for (const f of files.slice(0, free)) {
+          try { F.photos.push({ data: await shrinkPhoto(f) }); } catch (e) { photoErr.textContent = t('photoFail'); }
+        }
+      } finally { photoBusy.hidden = true; }
+      renderPhotos();
+      touch();
+    }
+    renderPhotos();
+    const photoBlock = h('fieldset', { class: 'group', 'data-field': 'photos' },
+      h('legend', { class: 'h2' }, t('photos'), h('span', { class: 'opt' }, ' (' + t('optional') + ')')),
+      h('p', { class: 'field-hint' }, t('photosHint', { n: PHOTO_MAX })),
+      photoHost, photoErr, photoBusy,
+      h('div', { class: 'btn-row' }, uploadBtn), photoIn);
+
     // ---------- Prüfung ----------
     const runValidation = (focusFirst) => {
       Object.keys(errs).forEach((k) => delete errs[k]);
@@ -1231,7 +1311,8 @@
           start: F.start, end: F.end, pauseMin: Number(F.pauseMin), activityIds: F.activityIds.slice(),
           description: (F.description || '').trim(), material: (F.material || '').trim(),
           clientName: F.showClient ? (F.clientName || '').trim() : '',
-          sigEmployee: F.sigEmployee || null, sigClient: F.showClient ? (F.sigClient || null) : null
+          sigEmployee: F.sigEmployee || null, sigClient: F.showClient ? (F.sigClient || null) : null,
+          photos: F.photos.map((p) => p.keep || p.data)
         };
         if (mode === 'edit') { report.id = src.id; report.baseVersion = src.version; }
         if (mode === 'queued' && src.id) { report.id = src.id; report.baseVersion = src.baseVersion; }
@@ -1279,6 +1360,7 @@
       fieldBox('description', t('description'), h('div', null, desc.ta, h('div', { class: 'tools' }, desc.mic, SR ? null : h('span', { class: 'field-hint' }, t('micHint'))))),
       fieldBox('material', t('material'), h('div', null, mat.ta, h('div', { class: 'tools' }, mat.mic)), h('span', { class: 'opt' }, ' (' + t('optional') + ')')),
       deBlock,
+      photoBlock,
       h('fieldset', { class: 'group' }, h('legend', { class: 'h2' }, t('signatures')), sigBlock('employee', t('sigEmployee')), clientToggle, clientBlock),
       h('div', { class: 'action-bar' }, sendBtn)
     ]);
@@ -1429,6 +1511,53 @@
   // ===================================================================
   //  Unterschrift
   // ===================================================================
+  /**
+   * Macht aus einem aufgenommenen Foto ein kleines JPEG: längste Kante PHOTO_EDGE,
+   * höchstens PHOTO_CHARS Zeichen. Sonst wäre die Warteschlange auf dem Handy voll
+   * und das Senden über Mobilfunk zu langsam. Dreht das Bild nach EXIF richtig herum.
+   */
+  async function shrinkPhoto(file) {
+    if (!file || !/^image\//.test(file.type || '')) throw new Error('kein Bild');
+    let src = null;
+    let url = null;
+    try { if (window.createImageBitmap) src = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { src = null; }
+    if (!src) {
+      url = URL.createObjectURL(file);
+      src = await new Promise((res, rej) => {
+        const im = new Image();
+        im.onload = () => res(im);
+        im.onerror = () => rej(new Error('nicht lesbar'));
+        im.src = url;
+      });
+    }
+    try {
+      const w0 = src.width || src.naturalWidth;
+      const h0 = src.height || src.naturalHeight;
+      if (!w0 || !h0) throw new Error('leeres Bild');
+      let scale = Math.min(1, PHOTO_EDGE / Math.max(w0, h0));
+      for (let tries = 0; tries < 3; tries++) {
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(w0 * scale));
+        c.height = Math.max(1, Math.round(h0 * scale));
+        const g = c.getContext('2d');
+        if (!g) throw new Error('kein Canvas');
+        g.fillStyle = '#FFFFFF';
+        g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(src, 0, 0, c.width, c.height);
+        for (const q of [0.72, 0.6, 0.5]) {
+          const data = c.toDataURL('image/jpeg', q);
+          if (data.slice(0, 15) !== 'data:image/jpeg') throw new Error('kein JPEG');
+          if (data.length <= PHOTO_CHARS) return data;
+        }
+        scale *= 0.75;
+      }
+      throw new Error('zu groß');
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+      if (src && src.close) src.close();
+    }
+  }
+
   function signaturePad(initial, onChange) {
     const canvas = h('canvas', { class: 'sig-canvas', role: 'img', 'aria-label': t('sigHere') });
     const hint = h('div', { class: 'sig-hint' }, t('sigHere'));
@@ -1537,6 +1666,7 @@
         kv(t('activitiesShort'), acts.join(listSep()) || '–'),
         kv(t('description'), h('span', { class: 'pre', dir: 'auto' }, r.description || '–')),
         r.material ? kv(t('material'), h('span', { class: 'pre', dir: 'auto' }, r.material)) : null,
+        kv(t('photos'), photoText((r.photos || []).length)),
         kv(t('signatures'), t('sigEmployee') + ': ' + (r.sigEmployee ? t('yes') : t('no')))
       ),
       ruler(r, false),
@@ -1602,6 +1732,7 @@
         showDe ? kv(t('germanTranslation'), h('span', { class: 'pre', dir: 'ltr', lang: 'de' }, r.descriptionDe || '–')) : null,
         r.materialOrig ? kv(t('material'), h('span', { class: 'pre', dir: 'auto' }, r.materialOrig)) : null,
         r.materialOrig && showDe ? kv(t('material') + ' – ' + t('germanTranslation'), h('span', { class: 'pre', dir: 'ltr', lang: 'de' }, r.materialDe || '–')) : null,
+        kv(t('photos'), photoText((r.photos || []).length)),
         kv(t('signatures'), [
           h('span', { class: 'sig-line-text' }, (officeView ? t('employee') : t('sigEmployee')) + ': ' + (r.sigEmployee ? t('yes') : t('no'))),
           h('span', { class: 'sig-line-text' }, t('sigClient') + ': ' + (r.sigClient ? t('yes') + (r.clientName ? ' (' + r.clientName + ')' : '') : t('no')))
@@ -2206,6 +2337,22 @@
           (viaLogin ? 'Das passiert, wenn Google auf die Anmeldeseite umleitet („Zugriff: Jeder“ fehlt, siehe oben).' : 'Etwas wurde blockiert; bitte den Bericht schicken.')];
       });
 
+      await step('Fotos hochladen', async () => {
+        const inp = document.createElement('input');
+        inp.type = 'file';
+        const canPick = inp.type === 'file';
+        let canShrink = false;
+        try {
+          const c = document.createElement('canvas');
+          c.width = 8; c.height = 8;
+          const g = c.getContext('2d');
+          if (g) { g.fillRect(0, 0, 8, 8); canShrink = c.toDataURL('image/jpeg', 0.7).slice(0, 15) === 'data:image/jpeg'; }
+        } catch (e) { canShrink = false; }
+        tech.push('Fotos: auswählen ' + canPick + ', verkleinern ' + canShrink);
+        if (!canPick || !canShrink) return ['fail', 'Dieses Handy kann in der App keine Fotos anhängen. Bitte einen anderen Browser versuchen (Android: Chrome, iPhone: Safari).'];
+        return ['ok', 'Fotos vom Handy hochladen und verkleinern möglich (höchstens ' + PHOTO_MAX + ' je Nachweis)'];
+      });
+
       if (TEXT_FIXES.applied || TEXT_FIXES.ignored.length) {
         await step('Textkorrekturen (config.js)', async () => {
           if (TEXT_FIXES.ignored.length) return ['warn', plural(TEXT_FIXES.applied, 'Korrektur', 'Korrekturen') + ' angewendet, ' + TEXT_FIXES.ignored.length + ' ignoriert (unbekannte Sprache oder Schlüssel, falscher Platzhalter, kein Text oder zu lang): ' + TEXT_FIXES.ignored.slice(0, 6).join(', ') + (TEXT_FIXES.ignored.length > 6 ? ' …' : '')];
@@ -2358,7 +2505,7 @@
     if (!s) throw err('auth');
     const user = { id: s.id, name: s.name, isOffice: s.isOffice, lang: s.lang };
     const actLabel = (id, l) => { const a = DEMO_ACTIVITIES.find((x) => x.id === id); return a ? ((l === 'ar' && a.ar) || (l === 'ku' && a.ku) || a.de) : ''; };
-    const summary = (r) => ({ id: r.id, date: r.date, start: r.start, end: r.end, pauseMin: r.pauseMin, hours: r.hours, status: r.status, version: r.version, employeeId: r.employeeId, employeeName: r.employeeName, project: user.isOffice ? r.projectDe : r.projectOrig, lang: r.lang, mailStatus: 'Demo – keine E-Mail' });
+    const summary = (r) => ({ id: r.id, date: r.date, start: r.start, end: r.end, pauseMin: r.pauseMin, hours: r.hours, status: r.status, version: r.version, employeeId: r.employeeId, employeeName: r.employeeName, project: user.isOffice ? r.projectDe : r.projectOrig, lang: r.lang, photoCount: (r.photos || []).length, mailStatus: 'Demo – keine E-Mail' });
     switch (action) {
       case 'bootstrap':
         return { ok: true, user, firma: 'Demo GmbH', projects: DEMO_PROJECTS, activities: DEMO_ACTIVITIES, staff: user.isOffice ? DEMO_STAFF.map((x) => ({ id: x.id, name: x.name })) : undefined };
@@ -2386,6 +2533,10 @@
           clientName: r.clientName,
           sigEmployee: r.sigEmployee === 'keep' && prev ? prev.sigEmployee : (r.sigEmployee ? { version: prev ? prev.version + 1 : 1 } : null),
           sigClient: r.sigClient === 'keep' && prev ? prev.sigClient : (r.sigClient ? { version: prev ? prev.version + 1 : 1 } : null),
+          // Demo: Fotos werden nicht gespeichert, nur gezählt – behaltene bleiben, neue bekommen eine Schein-Kennung
+          photos: (r.photos || []).map((p, i) => (String(p).slice(0, 5) === 'data:'
+            ? { id: 'demo-foto-' + (++db.counter) + '-' + i, at: new Date().toISOString().slice(0, 16).replace('T', ' ') }
+            : ((prev && (prev.photos || []).find((x) => x.id === p)) || null))).filter(Boolean),
           clientId: prev ? prev.clientId : r.clientId, lastEditId: prev ? r.clientId : '',
           createdAt: prev ? prev.createdAt : new Date().toISOString().slice(0, 16).replace('T', ' '),
           updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' '), updatedBy: user.name

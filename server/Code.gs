@@ -1,7 +1,7 @@
 /**
  * =====================================================================
  *  LEISTUNGSNACHWEIS-APP · Server (Google Apps Script)
- *  Version 1.0.2
+ *  Version 1.2.1
  * ---------------------------------------------------------------------
  *  Gehört in eine Google-Tabelle:  Erweiterungen → Apps Script.
  *   1. Diesen Code komplett einfügen (alten Inhalt ersetzen), speichern.
@@ -24,13 +24,21 @@
  * =====================================================================
  */
 
-const APP_VERSION = '1.0.2';
+const APP_VERSION = '1.2.1';
 const TZ = 'Europe/Berlin';
+
+/** Firmendesign Dagho Bau für Dokumente und E-Mail (Logo: LOGO_PNG_B64 am Ende der Datei) */
+const BRAND = { deep: '#157977', soft: '#E3F3F2' };
+const LOGO_DOC_W = 100;         // Breite des Logos im Dokument (pt); Höhe nach Seitenverhältnis
+const LOGO_RATIO = 294 / 480;   // Höhe / Breite des eingebetteten PNG
 
 const TOKEN_MAX_AGE_MS = 180 * 24 * 3600 * 1000; // Anmeldung gilt 180 Tage
 const LOGIN_MAX_FAILS = 20;                        // Fehlversuche (gesamt) …
 const LOGIN_LOCK_SECONDS = 600;                    // … dann 10 Min. Sperre für neue Anmeldungen
 const LOGIN_MAX_FAILS_DAY = 50;                    // höchstens 50 Fehlversuche pro Tag, dann Sperre + Warn-E-Mail
+const PHOTO_MAX = 3;                               // höchstens 3 Fotos je Nachweis (Speicher auf dem Handy, Größe der Anfrage)
+const PHOTO_MAX_CHARS = 400000;                    // je Foto höchstens ~400.000 Zeichen (≈ 290 KB Bild) – die App verkleinert vorher
+const PHOTO_DOC_W = 260;                           // Breite im Word/PDF-Dokument (pt)
 const PIN_MIN_STAFF = 6;                           // PIN-Länge: Mitarbeiter mindestens 6 Ziffern …
 const PIN_MIN_OFFICE = 8;                          // … Büro mindestens 8 Ziffern (sieht alle Nachweise)
 const PIN_MAX = 10;
@@ -86,6 +94,7 @@ const REPORT_COLS = [
   ['materialOrig', 'Material/Geräte (Original)', 't'],
   ['projectOrig', 'Bauvorhaben (Original)', 't'],
   ['activitiesOrig', 'Tätigkeiten (Original)', 't'],
+  ['photoCount', 'Fotos (Anzahl)', 'n'],
   ['sigEmployeeInfo', 'Unterschrift Mitarbeiter', 't'],
   ['sigClientInfo', 'Unterschrift Auftraggeber', 't'],
   ['clientName', 'Name Unterzeichner', 't'],
@@ -102,6 +111,7 @@ const REPORT_COLS = [
   ['clientId', 'Client-ID', 't', true],
   ['lastEditId', 'Letzte Änderungs-ID', 't', true],
   ['sigData', 'Unterschrift-Daten', 't', true],
+  ['photoData', 'Foto-Daten', 't', true],
   ['docIds', 'Dokument-IDs', 't', true]
 ];
 
@@ -131,6 +141,7 @@ const DOC_TEXT = {
     employee: 'Mitarbeiter', date: 'Datum', project: 'Bauvorhaben', start: 'Arbeitsbeginn',
     end: 'Arbeitsende', pause: 'Pause', worktime: 'Arbeitszeit (ohne Pause)', min: 'Min.', hours: 'Std.',
     activities: 'Ausgeführte Tätigkeiten', description: 'Beschreibung', material: 'Material / Geräte',
+    photos: 'Fotos', photo: 'Foto', photoMissing: 'Foto nicht gefunden',
     signatures: 'Unterschriften', sigEmployee: 'Mitarbeiter', sigClient: 'Auftraggeber / Bauleitung',
     noSig: 'nicht unterschrieben', sigMissing: 'Unterschrift nicht gefunden',
     sigForVersion: 'unterschrieben für Version {v}', created: 'erstellt', changed: 'geändert',
@@ -142,6 +153,7 @@ const DOC_TEXT = {
     employee: 'العامل', date: 'التاريخ', project: 'المشروع (موقع العمل)', start: 'بداية العمل',
     end: 'نهاية العمل', pause: 'الاستراحة', worktime: 'ساعات العمل (بدون الاستراحة)', min: 'دقيقة', hours: 'ساعة',
     activities: 'الأعمال المنفذة', description: 'الوصف', material: 'المواد / المعدات',
+    photos: 'الصور', photo: 'صورة', photoMissing: 'الصورة غير موجودة',
     signatures: 'التواقيع', sigEmployee: 'العامل', sigClient: 'صاحب العمل / مدير الموقع',
     noSig: 'غير موقّع', sigMissing: 'التوقيع غير موجود',
     sigForVersion: 'التوقيع يخص النسخة {v}', created: 'أُنشئ', changed: 'عُدّل',
@@ -153,6 +165,7 @@ const DOC_TEXT = {
     employee: 'Karker', date: 'Dîrok', project: 'Proje (cihê kar)', start: 'Destpêka kar',
     end: 'Dawiya kar', pause: 'Bêhnvedan', worktime: 'Dema kar (bê bêhnvedan)', min: 'deq.', hours: 'saet',
     activities: 'Karên hatine kirin', description: 'Danasîn', material: 'Malzeme / amûr',
+    photos: 'Wêne', photo: 'Wêne', photoMissing: 'Wêne nehat dîtin',
     signatures: 'Îmze', sigEmployee: 'Karker', sigClient: 'Xwediyê kar / berpirsê cih',
     noSig: 'ne îmzekirî', sigMissing: 'Îmze nehat dîtin',
     sigForVersion: 'îmze ji bo guhertoya {v}', created: 'hat çêkirin', changed: 'hat guhertin',
@@ -370,10 +383,11 @@ function actionSubmit_(req) {
 
     rec = composeRecord_(ctx, t, input, user, prev, warnings);
     if (prev) {
-      changes = diffRecords_(prev, rec).concat(signatureChanges_(input, prev));
+      changes = diffRecords_(prev, rec).concat(signatureChanges_(input, prev), photoChanges_(input, prev));
       if (!changes.length) return resultOf_(prev, false, ['no_changes']);
     }
     saveSignatures_(ctx, rec, input, prev, warnings);
+    savePhotos_(ctx, rec, input, prev, warnings);
 
     // 1. Zuerst die Daten sichern – Dokumente und E-Mail folgen danach.
     writeRecord_(t, rec, prev);
@@ -482,6 +496,8 @@ function actionGet_(req) {
     clientName: r.clientName,
     sigEmployee: sig.employee ? { version: Number(sig.employee.version) } : null,
     sigClient: sig.client ? { version: Number(sig.client.version) } : null,
+    // Fotos nur als Kennung: Die App zeigt sie nicht an, sie kann sie aber behalten oder entfernen.
+    photos: (parseJson_(r.photoData) || []).map(function (p) { return { id: p.fileId, at: p.at }; }),
     employeeName: r.employeeName, employeeId: r.employeeId,
     createdAt: r.createdAt, updatedAt: r.updatedAt, updatedBy: r.updatedBy,
     locked: r.status === STATUS.APPROVED
@@ -851,6 +867,7 @@ function validateReport_(r, user) {
   if (out.clientName.length > 100) bad.push('clientName');
   out.sigEmployee = signatureInput_(r.sigEmployee, bad, 'sigEmployee');
   out.sigClient = signatureInput_(r.sigClient, bad, 'sigClient');
+  out.photos = photosInput_(r.photos, bad);
   if (!out.id) {
     if (out.sigEmployee === 'keep') out.sigEmployee = null;
     if (out.sigClient === 'keep') out.sigClient = null;
@@ -874,6 +891,33 @@ function signatureInput_(v, bad, field) {
   if (typeof v === 'string' && v.length <= 400000 && /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(v)) return v;
   bad.push(field);
   return null;
+}
+
+/**
+ * Fotos aus der App: je Eintrag entweder ein neues Bild (data:image/jpeg;base64,…)
+ * oder die Datei-Kennung eines Fotos, das schon gespeichert ist (bleibt erhalten).
+ * Alles andere wird abgelehnt; mehr als PHOTO_MAX Fotos ebenfalls.
+ */
+function photosInput_(v, bad) {
+  if (v === undefined) return null;            // Feld fehlt (ältere App-Version) → vorhandene Fotos unverändert lassen
+  if (v === null || v === '') return [];
+  if (!Array.isArray(v)) { bad.push('photos'); return []; }
+  if (v.length > PHOTO_MAX) { bad.push('photos'); return []; }
+  const out = [];
+  for (let i = 0; i < v.length; i++) {
+    const p = v[i];
+    if (typeof p !== 'string' || !p) { bad.push('photos'); return []; }
+    if (p.slice(0, 11) === 'data:image/') {
+      if (p.length > PHOTO_MAX_CHARS || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(p)) { bad.push('photos'); return []; }
+      out.push({ data: p });
+    } else if (/^[A-Za-z0-9_-]{10,100}$/.test(p)) {
+      out.push({ keep: p });
+    } else {
+      bad.push('photos');
+      return [];
+    }
+  }
+  return out;
 }
 
 // =====================================================================
@@ -917,6 +961,8 @@ function composeRecord_(ctx, t, input, user, prev, warnings) {
     sigData: prev ? prev.sigData : '',
     sigEmployeeInfo: prev ? prev.sigEmployeeInfo : 'nein',
     sigClientInfo: prev ? prev.sigClientInfo : 'nein',
+    photoData: prev ? prev.photoData : '',
+    photoCount: prev ? Number(prev.photoCount) || 0 : 0,
     mailStatus: 'wird gesendet …'
   };
 
@@ -1035,6 +1081,58 @@ function saveSignatures_(ctx, rec, input, prev, warnings) {
   rec.sigData = Object.keys(data).length ? JSON.stringify(data) : '';
   rec.sigEmployeeInfo = data.employee ? 'ja (Version ' + data.employee.version + ')' : 'nein';
   rec.sigClientInfo = data.client ? 'ja (Version ' + data.client.version + ')' : 'nein';
+}
+
+/**
+ * Fotos für das Blatt "Änderungen" und die Korrektur-E-Mail.
+ * Zählt auch den Tausch: ein Foto raus, ein anderes rein ergibt zwar wieder zwei,
+ * ist aber eine Änderung – sonst würde die Korrektur als "nichts geändert" abgewiesen.
+ */
+function photoChanges_(input, prev) {
+  if (input.photos === null) return [];
+  const had = (parseJson_(prev && prev.photoData) || []).map(function (p) { return p.fileId; });
+  const keep = input.photos.filter(function (p) { return p.keep; }).map(function (p) { return p.keep; });
+  const added = input.photos.filter(function (p) { return p.data; }).length;
+  const removed = had.filter(function (id) { return keep.indexOf(id) < 0; }).length;
+  if (!added && !removed) return [];
+  const note = [];
+  if (added) note.push(added + ' neu');
+  if (removed) note.push(removed + ' entfernt');
+  return [{ label: 'Fotos', old: String(had.length), now: (keep.length + added) + ' (' + note.join(', ') + ')' }];
+}
+
+/**
+ * Speichert neue Fotos in Drive (Ordner "Fotos") und behält die, die der Nachweis schon hat.
+ * Die Bilder stehen nur im Word-/PDF-Dokument, nicht in der Excel-Liste (EXPORT_COLS).
+ * Ein Foto, das sich nicht speichern lässt, hält den Nachweis nicht auf: Warnung + Protokoll.
+ */
+function savePhotos_(ctx, rec, input, prev, warnings) {
+  if (input.photos === null) return;           // Feld fehlt → rec hat die Fotos von prev schon übernommen
+  const had = parseJson_(prev && prev.photoData) || [];
+  const byId = {};
+  had.forEach(function (p) { if (p && p.fileId) byId[p.fileId] = p; });
+  const out = [];
+  input.photos.forEach(function (p, i) {
+    if (p.keep) {
+      if (byId[p.keep]) out.push(byId[p.keep]);       // unbekannte Kennung wird stillschweigend verworfen
+      return;
+    }
+    try {
+      const bytes = Utilities.base64Decode(p.data.split(',')[1]);
+      // JPEG prüfen (FF D8 FF) – nur echte Bilder werden gespeichert
+      if (bytes.length < 8 || (bytes[0] & 0xff) !== 0xff || (bytes[1] & 0xff) !== 0xd8 || (bytes[2] & 0xff) !== 0xff) {
+        throw new Error('kein JPEG');
+      }
+      const name = rec.id + '_foto' + (i + 1) + '_v' + rec.version + '.jpg';
+      const file = folder_(ctx, 'PHOTO_FOLDER_ID', 'Fotos').createFile(Utilities.newBlob(bytes, 'image/jpeg', name));
+      out.push({ fileId: file.getId(), version: rec.version, at: nowText_() });
+    } catch (err) {
+      warnings.push('photo_failed');
+      logEvent_('FEHLER', 'Foto ' + rec.id + ': ' + errText_(err));
+    }
+  });
+  rec.photoData = out.length ? JSON.stringify(out) : '';
+  rec.photoCount = out.length;
 }
 
 function nextId_(ctx, t) {
@@ -1379,10 +1477,13 @@ function buildDocBody_(ctx, doc, rec, lang) {
   body.clear();
   body.setMarginTop(40).setMarginBottom(40).setMarginLeft(48).setMarginRight(48);
 
+  // Kopf im Firmendesign: Logo, darunter Firmenname und Titel
   const first = body.getParagraphs()[0];
-  first.setText(settings_(ctx).firma);
-  para_(first, rtl, { size: 10, color: '#555555' });
-  para_(body.appendParagraph(T.title), rtl, { size: 20, bold: true, after: 2 });
+  first.setText('');
+  para_(first, rtl, { size: 6, after: 6 });
+  addLogo_(first);
+  para_(body.appendParagraph(settings_(ctx).firma), rtl, { size: 10, color: '#555555' });
+  para_(body.appendParagraph(T.title), rtl, { size: 20, bold: true, after: 2, color: BRAND.deep });
   para_(body.appendParagraph(T.subtitle + ' · ' + T.no + ' ' + rec.id + ' · ' + T.version + ' ' + rec.version),
     rtl, { size: 10, color: '#555555', after: 10 });
 
@@ -1417,6 +1518,8 @@ function buildDocBody_(ctx, doc, rec, lang) {
     multiline_(body, lang === 'de' ? rec.materialDe : rec.materialOrig, rtl);
   }
 
+  photoSection_(body, rec, T, rtl);
+
   sectionTitle_(body, T.signatures, rtl);
   signatureTable_(body, rec, T, rtl);
 
@@ -1448,7 +1551,20 @@ function para_(p, rtl, o) {
 }
 
 function sectionTitle_(body, text, rtl) {
-  return para_(body.appendParagraph(text), rtl, { size: 12, bold: true, before: 12, after: 4 });
+  return para_(body.appendParagraph(text), rtl, { size: 12, bold: true, before: 12, after: 4, color: BRAND.deep });
+}
+
+/** Firmenlogo in einen (leeren) Absatz setzen. Fehlt es aus irgendeinem Grund, entsteht das Dokument ohne Logo. */
+function addLogo_(p) {
+  try {
+    const img = p.appendInlineImage(Utilities.newBlob(Utilities.base64Decode(LOGO_PNG_B64), 'image/png', 'logo.png'));
+    img.setWidth(LOGO_DOC_W);
+    img.setHeight(Math.round(LOGO_DOC_W * LOGO_RATIO));
+    return true;
+  } catch (e) {
+    logEvent_('WARN', 'Logo konnte nicht ins Dokument gesetzt werden: ' + errText_(e));
+    return false;
+  }
 }
 
 function multiline_(body, text, rtl) {
@@ -1467,11 +1583,34 @@ function infoTable_(body, rows, rtl) {
     for (let c = 0; c < 2; c++) {
       const cell = table.getCell(i, c);
       cell.setPaddingTop(3).setPaddingBottom(3).setPaddingLeft(6).setPaddingRight(6);
-      if (c === labelCol) cell.setBackgroundColor('#F1F1F1');
+      if (c === labelCol) cell.setBackgroundColor(BRAND.soft);
       para_(cell.getChild(0).asParagraph(), rtl, { size: 10.5, bold: c === labelCol });
     }
   }
   return table;
+}
+
+/** Fotos des Nachweises untereinander ins Dokument, je mit "Foto 1" und Aufnahmezeit darunter. */
+function photoSection_(body, rec, T, rtl) {
+  const photos = parseJson_(rec.photoData) || [];
+  if (!photos.length) return;
+  sectionTitle_(body, T.photos, rtl);
+  photos.forEach(function (p, i) {
+    const par = para_(body.appendParagraph(''), rtl, { size: 10, before: 4 });
+    let ok = false;
+    try {
+      const img = par.appendInlineImage(DriveApp.getFileById(p.fileId).getBlob());
+      const ratio = img.getWidth() ? img.getHeight() / img.getWidth() : 0.75;
+      img.setWidth(PHOTO_DOC_W);
+      img.setHeight(Math.max(20, Math.round(PHOTO_DOC_W * ratio)));
+      ok = true;
+    } catch (err) {
+      par.setText(T.photoMissing);
+      para_(par, rtl, { size: 10, color: '#B00020' });
+      logEvent_('WARNUNG', 'Foto fehlt im Dokument (' + rec.id + '): ' + errText_(err));
+    }
+    if (ok) para_(body.appendParagraph(T.photo + ' ' + (i + 1) + ' · ' + fmtDateTime_(p.at)), rtl, { size: 8, color: '#777777' });
+  });
 }
 
 function signatureTable_(body, rec, T, rtl) {
@@ -1487,7 +1626,7 @@ function signatureTable_(body, rec, T, rtl) {
   for (let c = 0; c < 2; c++) {
     const col = cols[c];
     const head = table.getCell(0, c);
-    head.setBackgroundColor('#F1F1F1');
+    head.setBackgroundColor(BRAND.soft);
     para_(head.getChild(0).asParagraph(), rtl, { size: 9.5, bold: true });
 
     const imgPar = table.getCell(1, c).getChild(0).asParagraph();
@@ -1615,13 +1754,13 @@ function sendReportMail_(ctx, rec, opts) {
 function mailHtml_(ctx, rec, changes, problems) {
   const e = escHtml_;
   const row = function (k, v) {
-    return '<tr><td style="background:#f1f1f1;font-weight:bold;padding:6px 10px;border:1px solid #ddd;vertical-align:top">' +
+    return '<tr><td style="background:' + BRAND.soft + ';font-weight:bold;padding:6px 10px;border:1px solid #ddd;vertical-align:top">' +
       e(k) + '</td><td style="padding:6px 10px;border:1px solid #ddd">' + v + '</td></tr>';
   };
   const netMin = toMin_(rec.end) - toMin_(rec.start) - Number(rec.pauseMin);
   const sig = parseJson_(rec.sigData) || {};
   let h = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111;max-width:720px">';
-  h += '<h2 style="margin:0 0 4px">Leistungsnachweis ' + e(rec.id) + '</h2>';
+  h += '<h2 style="margin:0 0 4px;color:' + BRAND.deep + '">Leistungsnachweis ' + e(rec.id) + '</h2>';
   h += '<p style="margin:0 0 14px;color:#555">Version ' + e(rec.version) + ' · Status: ' + e(rec.status) +
     (Number(rec.version) > 1 ? ' · geändert von ' + e(rec.updatedBy) : '') + '</p>';
   problems.forEach(function (p) {
@@ -1635,6 +1774,8 @@ function mailHtml_(ctx, rec, changes, problems) {
   h += row('Tätigkeiten', e(rec.activitiesDe || '–'));
   h += row('Beschreibung', nl2br_(e(rec.descriptionDe || '–')));
   if (rec.materialOrig) h += row('Material / Geräte', nl2br_(e(rec.materialDe)));
+  const photoN = (parseJson_(rec.photoData) || []).length;
+  if (photoN) h += row('Fotos', photoN + (photoN === 1 ? ' Foto' : ' Fotos') + ' – im Word- und PDF-Dokument');
   h += row('Unterschriften', 'Mitarbeiter: ' + (sig.employee ? 'ja' : 'nein') + ' · Auftraggeber: ' +
     (sig.client ? 'ja' + (rec.clientName ? ' (' + e(rec.clientName) + ')' : '') : 'nein'));
   h += '</table>';
@@ -1977,6 +2118,7 @@ function einrichten() {
 
   const root = folder_(ctx, 'FOLDER_ID', 'Leistungsnachweise (App)');
   folder_(ctx, 'SIG_FOLDER_ID', 'Unterschriften');
+  folder_(ctx, 'PHOTO_FOLDER_ID', 'Fotos');
   folder_(ctx, 'BACKUP_FOLDER_ID', 'Sicherungen');
 
   const msg = 'Einrichtung abgeschlossen.\n\n' +
@@ -2130,6 +2272,19 @@ function selbsttest() {
     createdAt: nowText_(), updatedAt: nowText_(), updatedBy: 'Selbsttest', mailStatus: ''
   };
   let ids = null;
+  check('Foto im Nachweis', function () {
+    const root = folder_(ctx, 'FOLDER_ID', 'Leistungsnachweise (App)');
+    const it = root.getFoldersByName('Selbsttest');
+    const folder = it.hasNext() ? it.next() : root.createFolder('Selbsttest');
+    // Altes Testfoto wegräumen, damit der Ordner nicht volläuft
+    const old = folder.getFilesByName('Selbsttest-Foto.jpg');
+    while (old.hasNext()) old.next().setTrashed(true);
+    const blob = Utilities.newBlob(Utilities.base64Decode(TEST_PHOTO_B64), 'image/jpeg', 'Selbsttest-Foto.jpg');
+    const file = folder.createFile(blob);
+    rec.photoData = JSON.stringify([{ fileId: file.getId(), version: 1, at: nowText_() }]);
+    rec.photoCount = 1;
+    return 'Testfoto gespeichert (' + Math.round(blob.getBytes().length / 1024) + ' KB) – es muss gleich im Word und im PDF zu sehen sein';
+  });
   check('Dokumente (Deutsch + Arabisch)', function () {
     const root = folder_(ctx, 'FOLDER_ID', 'Leistungsnachweise (App)');
     const it = root.getFoldersByName('Selbsttest');
@@ -2403,3 +2558,15 @@ function decodeEntities_(s) {
 function errText_(err) {
   return err && err.message ? String(err.message) : String(err);
 }
+
+// =====================================================================
+//  Testfoto für den Selbsttest (JPEG 480 × 360 px). Es wird bei jedem Selbsttest
+//  neu in den Ordner "Selbsttest" gelegt und muss im Word und im PDF zu sehen sein.
+// =====================================================================
+const TEST_PHOTO_B64 = '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';
+
+// =====================================================================
+//  Firmenlogo Dagho Bau (PNG 480 × 294 px, Türkis #33B6B3 auf transparent),
+//  aus dem Firmenlogo vektorisiert – dieselbe Vorlage wie app/icons/logo.svg.
+// =====================================================================
+const LOGO_PNG_B64 = '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';
