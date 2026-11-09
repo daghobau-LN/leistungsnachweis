@@ -1,7 +1,7 @@
 /**
  * =====================================================================
  *  LEISTUNGSNACHWEIS-APP · Server (Google Apps Script)
- *  Version 1.2.1
+ *  Version 1.2.1 (Korrektur 07.11.2026: Dokumentkopf)
  * ---------------------------------------------------------------------
  *  Gehört in eine Google-Tabelle:  Erweiterungen → Apps Script.
  *   1. Diesen Code komplett einfügen (alten Inhalt ersetzen), speichern.
@@ -1477,9 +1477,11 @@ function buildDocBody_(ctx, doc, rec, lang) {
   body.clear();
   body.setMarginTop(40).setMarginBottom(40).setMarginLeft(48).setMarginRight(48);
 
-  // Kopf im Firmendesign: Logo, darunter Firmenname und Titel
+  // Kopf im Firmendesign: Logo, darunter Firmenname und Titel.
+  // Nach body.clear() ist der erste Absatz leer. Kein setText(''): Google lehnt das ab
+  // ("Leeres Textelement kann nicht eingefügt werden").
   const first = body.getParagraphs()[0];
-  first.setText('');
+  if (first.getText()) first.clear();
   para_(first, rtl, { size: 6, after: 6 });
   addLogo_(first);
   para_(body.appendParagraph(settings_(ctx).firma), rtl, { size: 10, color: '#555555' });
